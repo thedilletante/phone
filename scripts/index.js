@@ -4,6 +4,128 @@ async function getUserMedia() {
     return stream;
 }
 
-getUserMedia().then(stream => {
-    console.log('adding stream', stream);
+const localMediaState = {
+    offer: {},
+    answer: {},
+    candidates: []
+};
+
+const pc = new RTCPeerConnection({
+    iceServers:[
+        {
+            urls: "stun:stun.l.google.com:19302",
+        },
+    ],
+    iceCandidatePoolSize: 100,
 });
+pc.onicecandidate = e => {
+    if (e.candidate !== null) {
+        localMediaState.candidates.push({
+            candidate: e.candidate.candidate,
+            sdpMid: e.candidate.sdpMid,
+            sdpMLineIndex: e.candidate.sdpMLineIndex,
+            usernameFragment: e.candidate.usernameFragment,
+        });
+    }
+};
+
+pc.ontrack = e => {
+    console.log('track', e);
+    const remoteVideo = document.getElementById('remoteVideo');
+    remoteVideo.srcObject = e.streams[0];
+}
+
+function waitGatheringComplete(pc) {
+    return new Promise(resolve => {
+        let count = 0;
+        const listener = e => {
+            if (e.target.iceGatheringState === "complete") {
+                pc.removeEventListener("icegatheringstatechange", listener);
+                resolve();
+            }
+        };
+
+        pc.addEventListener("icegatheringstatechange", listener);
+    });
+}
+
+async function main() {
+     //Autoconnect when given a peer id, i.e. #someid
+    const initialHash = window.location.hash.substr(1);
+
+    const stream = await getUserMedia();
+    for (const track of stream.getTracks()) {
+        pc.addTransceiver(track);
+    }
+    if (initialHash) {
+        const remoteState = JSON.parse(atob(decodeURIComponent(initialHash)));
+        console.log('set remote description');
+        await pc.setRemoteDescription(remoteState.offer);
+        const answer = await pc.createAnswer();
+        console.log('set local description');
+        await pc.setLocalDescription(answer);
+        localMediaState.answer = {
+            type: answer.type,
+            sdp: answer.sdp,
+        };
+        await waitGatheringComplete(pc);
+        const hash = encodeURIComponent(btoa(JSON.stringify(localMediaState)));
+        document.getElementById('localState').value = hash;
+        document.getElementById('btnCopyLocalState').disabled = false;
+        for (const candidate of remoteState.candidates) {
+          pc.addIceCandidate(candidate);
+        }
+    } else {
+        const offer = await pc.createOffer();
+        localMediaState.offer = {
+            type: offer.type,
+            sdp: offer.sdp,
+        };
+        console.log('set local description');
+        await pc.setLocalDescription(offer);
+        await waitGatheringComplete(pc);
+        const hash = encodeURIComponent(btoa(JSON.stringify(localMediaState)));
+        window.location.hash = '#' + hash;
+        document.getElementById('localState').value = hash;
+        document.getElementById('btnCopyLocalState').disabled = false;
+    }
+}
+
+
+
+function copyLocalState() {
+  // Get the text field
+  const copyText = document.getElementById("localState");
+
+  // Select the text field
+  copyText.select();
+  copyText.setSelectionRange(0, 99999); // For mobile devices
+
+   // Copy the text inside the text field
+  navigator.clipboard.writeText(copyText.value);
+
+}
+
+
+const applyBtn = document.getElementById('btnApplyRemoteState');
+const remoteStateInput = document.getElementById('remoteState');
+applyBtn.onclick = () => {
+    const stateValue = remoteStateInput.value;
+    const remoteState = JSON.parse(atob(decodeURIComponent(stateValue)));
+
+    console.log('set remote description');
+    applyBtn.disabled = true;
+    remoteStateInput.disabled = true;
+    pc.setRemoteDescription(remoteState.answer).then(() => {
+        for (const candidate of remoteState.candidates) {
+            pc.addIceCandidate(candidate);
+        }
+    });
+};
+
+remoteStateInput.onchange = () => {
+    applyBtn.disabled = remoteStateInput.value.trim() === "";
+};
+
+
+main().catch(console.error);
