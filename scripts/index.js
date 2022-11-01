@@ -15,9 +15,9 @@ const pc = new RTCPeerConnection({
         {
             urls: "stun:stun.l.google.com:19302",
         },
-    ],
-    iceCandidatePoolSize: 100,
+    ]
 });
+pc.onconnectionstatechange = () => console.log('connection state', pc.connectionState);
 pc.onicecandidate = e => {
     if (e.candidate !== null) {
         localMediaState.candidates.push({
@@ -39,13 +39,13 @@ function waitGatheringComplete(pc) {
     return new Promise(resolve => {
         let count = 0;
         const listener = e => {
-            if (e.target.iceGatheringState === "complete") {
-                pc.removeEventListener("icegatheringstatechange", listener);
+            if (e.candidate === null) {
+                pc.removeEventListener("icecandidate", listener);
                 resolve();
             }
         };
 
-        pc.addEventListener("icegatheringstatechange", listener);
+        pc.addEventListener("icecandidate", listener);
     });
 }
 
@@ -55,14 +55,14 @@ async function main() {
 
     const stream = await getUserMedia();
     for (const track of stream.getTracks()) {
-        pc.addTransceiver(track);
+        pc.addTrack(track, stream);
     }
     if (initialHash) {
         const remoteState = JSON.parse(atob(decodeURIComponent(initialHash)));
-        console.log('set remote description');
+        console.log('set remote description', remoteState.offer);
         await pc.setRemoteDescription(remoteState.offer);
         const answer = await pc.createAnswer();
-        console.log('set local description');
+        console.log('set local description', answer);
         await pc.setLocalDescription(answer);
         localMediaState.answer = {
             type: answer.type,
@@ -73,7 +73,8 @@ async function main() {
         document.getElementById('localState').value = hash;
         document.getElementById('btnCopyLocalState').disabled = false;
         for (const candidate of remoteState.candidates) {
-          pc.addIceCandidate(candidate);
+            console.log('add ice candidate', candidate);
+            await pc.addIceCandidate(candidate);
         }
     } else {
         const offer = await pc.createOffer();
@@ -81,7 +82,7 @@ async function main() {
             type: offer.type,
             sdp: offer.sdp,
         };
-        console.log('set local description');
+        console.log('set local description', offer);
         await pc.setLocalDescription(offer);
         await waitGatheringComplete(pc);
         const hash = encodeURIComponent(btoa(JSON.stringify(localMediaState)));
@@ -113,12 +114,13 @@ applyBtn.onclick = () => {
     const stateValue = remoteStateInput.value;
     const remoteState = JSON.parse(atob(decodeURIComponent(stateValue)));
 
-    console.log('set remote description');
+    console.log('set remote description', remoteState.answer);
     applyBtn.disabled = true;
     remoteStateInput.disabled = true;
-    pc.setRemoteDescription(remoteState.answer).then(() => {
+    pc.setRemoteDescription(remoteState.answer).then(async () => {
         for (const candidate of remoteState.candidates) {
-            pc.addIceCandidate(candidate);
+            console.log('add ice candidate', candidate);
+            await pc.addIceCandidate(candidate);
         }
     });
 };
