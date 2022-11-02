@@ -28,6 +28,8 @@ async function getUserMedia() {
 }
 
 let pc = undefined;
+let remoteDescriptionAdded = false;
+const pendingCandidates = [];
 
 function createPeerConnection(stream) {
     pc = new RTCPeerConnection({
@@ -71,6 +73,12 @@ function createPeerConnection(stream) {
     }
 
     return pc;
+}
+
+function addPendingCandidates() {
+    for (const candidate of pendingCandidates) {
+        pc.addIceCandidate(candidate);
+    }
 }
 
 let callId = undefined;
@@ -121,8 +129,11 @@ function processMessage(msg) {
             getUserMedia().then(stream => createPeerConnection(stream).setRemoteDescription({
                 type: "offer",
                 sdp: msg.sdp,
-            })).then(() => pc.createAnswer())
-            .then(answer => {
+            })).then(() => {
+                remoteDescriptionAdded = true;
+                addPendingCandidates();
+                return pc.createAnswer();
+            }).then(answer => {
                 send({
                     operation: "answer",
                     sdp: answer.sdp
@@ -134,10 +145,17 @@ function processMessage(msg) {
             pc.setRemoteDescription({
                 type: "answer",
                 sdp: msg.sdp,
+            }).then(() => {
+                remoteDescriptionAdded = true;
+                addPendingCandidates();
             });
             break;
         case "icecandidate":
-            pc.addIceCandidate(msg);
+            if (pc && remoteDescriptionAdded) {
+                pc.addIceCandidate(msg);
+            } else {
+                pendingCandidates.push(msg);
+            }
             break;
     }
 
