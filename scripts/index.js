@@ -1,5 +1,4 @@
 const ws = new WebSocket('wss://phone-simple-signalling.herokuapp.com');
-const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 function send(msg) {
     console.log("sending", msg);
@@ -21,22 +20,38 @@ async function waitConnected() {
 }
 
 
-async function getUserMedia() {
-    const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
-    localVideo.srcObject = stream;
-    return stream;
-}
-
 let pc = undefined;
 let remoteDescriptionAdded = false;
 const pendingCandidates = [];
 let iceServers = [
     {
-        urls: "stun:stun.l.google.com:19302",
+        urls: "stun:openrelay.metered.ca:80",
+    },
+    {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+    },
+    {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+    },
+    {
+        urls: "turn:openrelay.metered.ca:443?transport=tcp",
+        username: "openrelayproject",
+        credential: "openrelayproject",
     },
 ];
+let callId = undefined;
+let stream = undefined;
 
-function createPeerConnection(stream) {
+async function getUserMedia() {
+    stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
+    return stream;
+}
+
+function createPeerConnection() {
     pc = new RTCPeerConnection({ iceServers });
     for (const track of stream.getTracks()) {
         pc.addTrack(track, stream);
@@ -80,9 +95,9 @@ function addPendingCandidates() {
     }
 }
 
-let callId = undefined;
 async function main() {
     await waitConnected();
+    await getUserMedia();
      //Autoconnect when given a peer id, i.e. #someid
     const initialHash = window.location.hash.substr(1);
 
@@ -102,9 +117,6 @@ async function main() {
 
 function processMessage(msg) {
     console.log("receiving", msg);
-    if (typeof msg.iceServers !== "undefined") {
-        iceServers = msg.iceServers;
-    }
     if (typeof callId === "undefined") {
         if (typeof msg.callId != "undefined") {
             callId = msg.callId;
@@ -117,7 +129,7 @@ function processMessage(msg) {
     switch (msg.operation) {
         case "calling":
             console.log("getting user media");
-            getUserMedia().then(stream => createPeerConnection(stream).createOffer()).then(offer => {
+            createPeerConnection().createOffer().then(offer => {
                 send({
                     operation: "offer",
                     sdp: offer.sdp,
@@ -128,10 +140,10 @@ function processMessage(msg) {
             break;
         case "offer":
             console.log('set remote description', msg.sdp);
-            getUserMedia().then(stream => createPeerConnection(stream).setRemoteDescription({
+            createPeerConnection().setRemoteDescription({
                 type: "offer",
                 sdp: msg.sdp,
-            })).then(() => {
+            }).then(() => {
                 remoteDescriptionAdded = true;
                 addPendingCandidates();
                 return pc.createAnswer();
