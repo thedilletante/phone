@@ -30,15 +30,14 @@ async function getUserMedia() {
 let pc = undefined;
 let remoteDescriptionAdded = false;
 const pendingCandidates = [];
+let iceServers = [
+    {
+        urls: "stun:stun.l.google.com:19302",
+    },
+];
 
 function createPeerConnection(stream) {
-    pc = new RTCPeerConnection({
-        iceServers:[
-            {
-                urls: "stun:stun.l.google.com:19302",
-            },
-        ]
-    });
+    pc = new RTCPeerConnection({ iceServers });
     for (const track of stream.getTracks()) {
         pc.addTrack(track, stream);
     }
@@ -103,6 +102,9 @@ async function main() {
 
 function processMessage(msg) {
     console.log("receiving", msg);
+    if (typeof msg.iceServers !== "undefined") {
+        iceServers = msg.iceServers;
+    }
     if (typeof callId === "undefined") {
         if (typeof msg.callId != "undefined") {
             callId = msg.callId;
