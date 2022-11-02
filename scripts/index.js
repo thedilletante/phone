@@ -8,10 +8,10 @@ const applyBtn = document.getElementById('btnApplyRemoteState');
 const remoteStateInput = document.getElementById('remoteState');
 
 const localMediaState = {
-    offer: {},
-    answer: {},
+    sdp: "",
     candidates: []
 };
+let fillCandidates = true;
 
 const pc = new RTCPeerConnection({
     iceServers:[
@@ -20,9 +20,21 @@ const pc = new RTCPeerConnection({
         },
     ]
 });
-pc.onconnectionstatechange = () => console.log('connection state', pc.connectionState);
+pc.onconnectionstatechange = () => {
+    switch (pc.connectionState) {
+        case "connected":
+        case "failed":
+        case "disconnected":
+        case "closed": {
+            stopGathering();
+            break;
+        }
+    }
+    console.log('connection state', pc.connectionState);
+};
 pc.onicecandidate = e => {
-    if (e.candidate !== null) {
+    console.log("ice candidate", e);
+    if (fillCandidates && e.candidate !== null) {
         localMediaState.candidates.push({
             candidate: e.candidate.candidate,
             sdpMid: e.candidate.sdpMid,
@@ -75,15 +87,15 @@ async function main() {
         remoteStateInput.disabled = true;
         remoteStateInput.value = initialHash;
         const remoteState = decompress(initialHash);
-        console.log('set remote description', remoteState.offer);
-        await pc.setRemoteDescription(remoteState.offer);
+        console.log('set remote description', remoteState.sdp);
+        await pc.setRemoteDescription({
+            type: 'offer',
+            sdp: remoteState.sdp
+        });
         const answer = await pc.createAnswer();
         console.log('set local description', answer);
         await pc.setLocalDescription(answer);
-        localMediaState.answer = {
-            type: answer.type,
-            sdp: answer.sdp,
-        };
+        localMediaState.sdp = answer.sdp;
         for (const candidate of remoteState.candidates) {
             console.log('add ice candidate', candidate);
             await pc.addIceCandidate(candidate);
@@ -94,10 +106,7 @@ async function main() {
         document.getElementById('btnCopyLocalState').disabled = false;
     } else {
         const offer = await pc.createOffer();
-        localMediaState.offer = {
-            type: offer.type,
-            sdp: offer.sdp,
-        };
+        localMediaState.sdp = offer.sdp;
         console.log('set local description', offer);
         await pc.setLocalDescription(offer);
         await waitGatheringComplete(pc);
@@ -105,6 +114,8 @@ async function main() {
         window.location.hash = '#' + hash;
         document.getElementById('localState').value = hash;
         document.getElementById('btnCopyLocalState').disabled = false;
+        fillCandidates = false;
+        continueGathering();
     }
 }
 
@@ -122,15 +133,76 @@ function copyLocalState() {
   navigator.clipboard.writeText(copyText.value);
 }
 
+let gatheringEnabled = false;
+let gatheringListener = undefined;
+let gatheringResolver = undefined;
+
+
+function continueGathering() {
+    gatheringEnabled = true;
+    pc.createAnswer()
+        .then(offer => {
+            if (!gatheringEnabled) {
+                return;
+            }
+            console.log("set local description again");
+            return pc.setLocalDescription(offer);
+        }).then(() => {
+            if (!gatheringEnabled) {
+                return;
+            }
+
+            console.log("wait for new candidates");
+            return new Promise(resolve => {
+                gatheringResolver = resolve;
+                gatheringListener = e => {
+                    if (e.candidate === null) {
+                        pc.removeEventListener("icecandidate", gatheringListener);
+                        if (gatheringResolver) {
+                            gatheringResolver();
+                            gatheringResolver = undefined;
+                        }
+                    }
+                };
+
+                pc.addEventListener("icecandidate", gatheringListener);
+            });
+        }).then(() => {
+            gatheringResolver = undefined;
+            gatheringListener = undefined;
+            console.log("continue gathering", gatheringEnabled);
+            if (!gatheringEnabled) {
+                return;
+            }
+
+            continueGathering();
+        });
+}
+
+function stopGathering() {
+    gatheringEnabled = false;
+    if (typeof gatheringListener !== "undefined") {
+        pc.removeEventListener("icecandidate", gatheringListener);
+        gatheringListener = undefined;
+    }
+    if (typeof gatheringResolver !== "undefined") {
+        gatheringResolver();
+        gatheringResolver = undefined;
+    }
+}
+
 
 applyBtn.onclick = () => {
     const stateValue = remoteStateInput.value;
     const remoteState = decompress(stateValue);
 
-    console.log('set remote description', remoteState.answer);
+    console.log('set remote description', remoteState.sdp);
     applyBtn.disabled = true;
     remoteStateInput.disabled = true;
-    pc.setRemoteDescription(remoteState.answer).then(async () => {
+    pc.setRemoteDescription({
+        type: 'answer',
+        sdp: remoteState.sdp,
+    }).then(async () => {
         for (const candidate of remoteState.candidates) {
             console.log('add ice candidate', candidate);
             await pc.addIceCandidate(candidate);
