@@ -140,7 +140,7 @@ let gatheringResolver = undefined;
 
 function continueGathering() {
     gatheringEnabled = true;
-    pc.createAnswer()
+    pc.createOffer()
         .then(offer => {
             if (!gatheringEnabled) {
                 return;
