@@ -4,6 +4,9 @@ async function getUserMedia() {
     return stream;
 }
 
+const applyBtn = document.getElementById('btnApplyRemoteState');
+const remoteStateInput = document.getElementById('remoteState');
+
 const localMediaState = {
     offer: {},
     answer: {},
@@ -49,6 +52,17 @@ function waitGatheringComplete(pc) {
     });
 }
 
+function compress(data) {
+    //return encodeURIComponent(btoa(JSON.stringify(data)));
+    console.log(LZString.compressToEncodedURIComponent(JSON.stringify(data)));
+    return LZString.compressToEncodedURIComponent(JSON.stringify(data));
+}
+
+function decompress(data) {
+    //return JSON.parse(atob(decodeURIComponent(data)));
+    return JSON.parse(LZString.decompressFromEncodedURIComponent(data));
+}
+
 async function main() {
      //Autoconnect when given a peer id, i.e. #someid
     const initialHash = window.location.hash.substr(1);
@@ -58,7 +72,10 @@ async function main() {
         pc.addTrack(track, stream);
     }
     if (initialHash) {
-        const remoteState = JSON.parse(atob(decodeURIComponent(initialHash)));
+        applyBtn.disabled = true;
+        remoteStateInput.disabled = true;
+        remoteStateInput.value = initialHash;
+        const remoteState = decompress(initialHash);
         console.log('set remote description', remoteState.offer);
         await pc.setRemoteDescription(remoteState.offer);
         const answer = await pc.createAnswer();
@@ -69,7 +86,7 @@ async function main() {
             sdp: answer.sdp,
         };
         await waitGatheringComplete(pc);
-        const hash = encodeURIComponent(btoa(JSON.stringify(localMediaState)));
+        const hash = compress(localMediaState);
         document.getElementById('localState').value = hash;
         document.getElementById('btnCopyLocalState').disabled = false;
         for (const candidate of remoteState.candidates) {
@@ -85,7 +102,7 @@ async function main() {
         console.log('set local description', offer);
         await pc.setLocalDescription(offer);
         await waitGatheringComplete(pc);
-        const hash = encodeURIComponent(btoa(JSON.stringify(localMediaState)));
+        const hash = compress(localMediaState);
         window.location.hash = '#' + hash;
         document.getElementById('localState').value = hash;
         document.getElementById('btnCopyLocalState').disabled = false;
@@ -108,11 +125,9 @@ function copyLocalState() {
 }
 
 
-const applyBtn = document.getElementById('btnApplyRemoteState');
-const remoteStateInput = document.getElementById('remoteState');
 applyBtn.onclick = () => {
     const stateValue = remoteStateInput.value;
-    const remoteState = JSON.parse(atob(decodeURIComponent(stateValue)));
+    const remoteState = decompress(stateValue);
 
     console.log('set remote description', remoteState.answer);
     applyBtn.disabled = true;
@@ -125,7 +140,7 @@ applyBtn.onclick = () => {
     });
 };
 
-remoteStateInput.onchange = () => {
+remoteStateInput.onkeyup = () => {
     applyBtn.disabled = remoteStateInput.value.trim() === "";
 };
 

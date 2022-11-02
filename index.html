@@ -30,7 +30,7 @@
     <div class="row bg-secondary">
       <div class="col-md-1"></div>
       <div class="col-md-5">
-        <video id="localVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay muted playsinline></video>
       </div>
       <div class="col-md-5">
         <video id="remoteVideo" autoplay playsinline></video>
@@ -67,6 +67,7 @@
     <script src="https://webrtc.github.io/adapter/adapter-latest.js" crossorigin="anonymous"></script>
 
     <!-- Application script -->
+    <script src="scripts/lz-string.min.js"></script>
     <script src="scripts/index.js"></script>
   </body>
 </html>
