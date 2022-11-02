@@ -1,17 +1,15 @@
+const ws = new WebSocket('wss://phone-simple-signalling.herokuapp.com');
+const originalSend = ws.send.bind(ws);
+ws.send = msg => {
+    console.log("sending", msg);
+    return originalSend(msg);
+}
+
 async function getUserMedia() {
     const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
     document.getElementById('localVideo').srcObject = stream;
     return stream;
 }
-
-const applyBtn = document.getElementById('btnApplyRemoteState');
-const remoteStateInput = document.getElementById('remoteState');
-
-const localMediaState = {
-    sdp: "",
-    candidates: []
-};
-let fillCandidates = true;
 
 const pc = new RTCPeerConnection({
     iceServers:[
@@ -21,26 +19,25 @@ const pc = new RTCPeerConnection({
     ]
 });
 pc.onconnectionstatechange = () => {
-    switch (pc.connectionState) {
+    switch (pc.connnectionState) {
         case "connected":
         case "failed":
         case "disconnected":
-        case "closed": {
-            stopGathering();
+            ws.close();
             break;
-        }
     }
     console.log('connection state', pc.connectionState);
 };
 pc.onicecandidate = e => {
     console.log("ice candidate", e);
-    if (fillCandidates && e.candidate !== null) {
-        localMediaState.candidates.push({
+    if (e.candidate !== null) {
+        ws.send(JSON.stringify({
+            operation: "icecandidate",
             candidate: e.candidate.candidate,
             sdpMid: e.candidate.sdpMid,
             sdpMLineIndex: e.candidate.sdpMLineIndex,
             usernameFragment: e.candidate.usernameFragment,
-        });
+        }));
     }
 };
 
@@ -48,30 +45,6 @@ pc.ontrack = e => {
     console.log('track', e);
     const remoteVideo = document.getElementById('remoteVideo');
     remoteVideo.srcObject = e.streams[0];
-}
-
-function waitGatheringComplete(pc) {
-    return new Promise(resolve => {
-        let count = 0;
-        const listener = e => {
-            if (e.candidate === null) {
-                pc.removeEventListener("icecandidate", listener);
-                resolve();
-            }
-        };
-
-        pc.addEventListener("icecandidate", listener);
-    });
-}
-
-function compress(data) {
-    //return encodeURIComponent(btoa(JSON.stringify(data)));
-    return LZString.compressToEncodedURIComponent(JSON.stringify(data));
-}
-
-function decompress(data) {
-    //return JSON.parse(atob(decodeURIComponent(data)));
-    return JSON.parse(LZString.decompressFromEncodedURIComponent(data));
 }
 
 async function main() {
@@ -83,136 +56,63 @@ async function main() {
         pc.addTrack(track, stream);
     }
     if (initialHash) {
-        applyBtn.disabled = true;
-        remoteStateInput.disabled = true;
-        remoteStateInput.value = initialHash;
-        const remoteState = decompress(initialHash);
-        console.log('set remote description', remoteState.sdp);
-        await pc.setRemoteDescription({
-            type: 'offer',
-            sdp: remoteState.sdp
-        });
-        const answer = await pc.createAnswer();
-        console.log('set local description', answer);
-        await pc.setLocalDescription(answer);
-        localMediaState.sdp = answer.sdp;
-        for (const candidate of remoteState.candidates) {
-            console.log('add ice candidate', candidate);
-            await pc.addIceCandidate(candidate);
-        }
-        await waitGatheringComplete(pc);
-        const hash = compress(localMediaState);
-        document.getElementById('localState').value = hash;
-        document.getElementById('btnCopyLocalState').disabled = false;
+        ws.send(JSON.stringify({
+            role: "callee",
+            callId: initialHash
+        }));
     } else {
         const offer = await pc.createOffer();
-        localMediaState.sdp = offer.sdp;
+        ws.send(JSON.stringify({
+            role: "caller",
+            operation: "offer",
+            sdp: offer.sdp,
+        }));
         console.log('set local description', offer);
         await pc.setLocalDescription(offer);
-        await waitGatheringComplete(pc);
-        const hash = compress(localMediaState);
-        window.location.hash = '#' + hash;
-        document.getElementById('localState').value = hash;
-        document.getElementById('btnCopyLocalState').disabled = false;
-        fillCandidates = false;
-        continueGathering();
     }
 }
 
-
-
-function copyLocalState() {
-  // Get the text field
-  const copyText = document.getElementById("localState");
-
-  // Select the text field
-  copyText.select();
-  copyText.setSelectionRange(0, 99999); // For mobile devices
-
-   // Copy the text inside the text field
-  navigator.clipboard.writeText(copyText.value);
-}
-
-let gatheringEnabled = false;
-let gatheringListener = undefined;
-let gatheringResolver = undefined;
-
-
-function continueGathering() {
-    gatheringEnabled = true;
-    pc.createOffer()
-        .then(offer => {
-            if (!gatheringEnabled) {
-                return;
-            }
-            console.log("set local description again");
-            return pc.setLocalDescription(offer);
-        }).then(() => {
-            if (!gatheringEnabled) {
-                return;
-            }
-
-            console.log("wait for new candidates");
-            return new Promise(resolve => {
-                gatheringResolver = resolve;
-                gatheringListener = e => {
-                    if (e.candidate === null) {
-                        pc.removeEventListener("icecandidate", gatheringListener);
-                        if (gatheringResolver) {
-                            gatheringResolver();
-                            gatheringResolver = undefined;
-                        }
-                    }
-                };
-
-                pc.addEventListener("icecandidate", gatheringListener);
+function processMessage(msg) {
+    console.log("receiving", msg);
+    if (msg.callId) {
+        window.location.hash = '#' + msg.callId;
+        return;
+    }
+    switch (msg.operation) {
+        case "offer":
+            console.log('set remote description', msg.sdp);
+            pc.setRemoteDescription({
+                type: "offer",
+                sdp: msg.sdp,
+            }).then(() => pc.createAnswer())
+            .then(answer => {
+                ws.send(JSON.stringify({
+                    operation: "answer",
+                    sdp: answer.sdp
+                }));
+                return pc.setLocalDescription(answer);
             });
-        }).then(() => {
-            gatheringResolver = undefined;
-            gatheringListener = undefined;
-            console.log("continue gathering", gatheringEnabled);
-            if (!gatheringEnabled) {
-                return;
-            }
+            break;
+        case "answer":
+            pc.setRemoteDescription({
+                type: "answer",
+                sdp: msg.sdp,
+            });
+            break;
+        case "icecandidate":
+            pc.addIceCandidate(msg);
+            break;
+    }
 
-            continueGathering();
-        });
 }
 
-function stopGathering() {
-    gatheringEnabled = false;
-    if (typeof gatheringListener !== "undefined") {
-        pc.removeEventListener("icecandidate", gatheringListener);
-        gatheringListener = undefined;
+ws.addEventListener("message", e => {
+    try {
+        processMessage(JSON.parse(e.data));
+    } catch (err) {
+        console.log("failed to process message", err, e.data);
     }
-    if (typeof gatheringResolver !== "undefined") {
-        gatheringResolver();
-        gatheringResolver = undefined;
-    }
-}
 
-
-applyBtn.onclick = () => {
-    const stateValue = remoteStateInput.value;
-    const remoteState = decompress(stateValue);
-
-    console.log('set remote description', remoteState.sdp);
-    applyBtn.disabled = true;
-    remoteStateInput.disabled = true;
-    pc.setRemoteDescription({
-        type: 'answer',
-        sdp: remoteState.sdp,
-    }).then(async () => {
-        for (const candidate of remoteState.candidates) {
-            console.log('add ice candidate', candidate);
-            await pc.addIceCandidate(candidate);
-        }
-    });
-};
-
-remoteStateInput.onkeyup = () => {
-    applyBtn.disabled = remoteStateInput.value.trim() === "";
-};
-
+});
 
 main().catch(console.error);
