@@ -4,5 +4,5 @@
 
 * Application is hosted by [GitHub Pages](https://pages.github.com)
 * Application connects media (audio and video) of two participants
-* Application uses X (TODO) as a signalling for WebRTC
+* Application uses no server except static files storage
 * Application runs only on client side and is defined only by static pages (html, css, javascript)

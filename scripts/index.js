@@ -54,7 +54,6 @@ function waitGatheringComplete(pc) {
 
 function compress(data) {
     //return encodeURIComponent(btoa(JSON.stringify(data)));
-    console.log(LZString.compressToEncodedURIComponent(JSON.stringify(data)));
     return LZString.compressToEncodedURIComponent(JSON.stringify(data));
 }
 
@@ -121,7 +120,6 @@ function copyLocalState() {
 
    // Copy the text inside the text field
   navigator.clipboard.writeText(copyText.value);
-
 }
 
 
