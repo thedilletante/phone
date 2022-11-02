@@ -84,14 +84,14 @@ async function main() {
             type: answer.type,
             sdp: answer.sdp,
         };
-        await waitGatheringComplete(pc);
-        const hash = compress(localMediaState);
-        document.getElementById('localState').value = hash;
-        document.getElementById('btnCopyLocalState').disabled = false;
         for (const candidate of remoteState.candidates) {
             console.log('add ice candidate', candidate);
             await pc.addIceCandidate(candidate);
         }
+        await waitGatheringComplete(pc);
+        const hash = compress(localMediaState);
+        document.getElementById('localState').value = hash;
+        document.getElementById('btnCopyLocalState').disabled = false;
     } else {
         const offer = await pc.createOffer();
         localMediaState.offer = {
